@@ -1,0 +1,474 @@
+Note: For easier understanding, some code blocks are broken up into pieces. The full code can be found at the end of the paper on pages 15-17.
+
+# Introduction
+
+Baseball is known as "America's Favorite Pastime" and just about everyone growing up has had some form of involvement with the sport, whether that's playing little league, going to watch your cousin's high school baseball game, or traveling to a Major League Baseball game with friends and family. The sights and sounds of going to an MLB game are like nothing ever witnessed before, a foot-long hot dog, an ice-cold beverage, and the sound of the crack of a wooden bat fills the air. In its very base sense, Baseball is a basic game. You hit a ball with a bat and run around in a square shape, not that complicated, right? Well, you can take the meaning of Baseball much deeper than that, and with a little bit of mathematics, I begin to dive deeper into the world of the MLB and its analytics.
+
+To begin understanding baseball and analytics as a combination, we first must understand what analytics is, and how exactly it contributes to the MLB. Data analytics is defined in @WiDA22 as "the process of analyzing raw data to find trends and answer questions." While this is a very broad field of study, we can narrow it down into multiple different types of analytical research to describe the action taking place. For this research, we will be performing predictive analytics, which is a technique that uses historical data to identify trends and predict their likelihood of recurring. In predictive analysis, it is common for different forms of algorithms to be used in the process of analyzing the data. These algorithms improve the more data it has to use through a process known as machine learning. These machine learning techniques, such as regression and linear models, use different data sets to train and improve their predictability to give a close-to-perfect model. While no model is one hundred percent accurate, we can do our best to create a model as close to perfect as we can. @Boehmke20
+
+So how are we able to connect baseball and analytics in order to create a model to predict wins? Well first, we need a way to compare two teams, along with creating a system that will rank all the teams within the MLB. There is a system that exists already that uses statistical analysis in order to rank players against each other, and the is the Elo system commonly used in Chess. The Elo ranking system was developed by a physics professor from Marquette University by the name of Arpad Elo in the 1950s, and the system works to calculate the probable outcome of a game between two players, or teams. Chess is a game similar to baseball in the fact that one slip up can cost you the game, and with the Elo ranking system, it takes into consideration the changes in a team's performance. @Elo20
+
+The Elo system created for chess, accordint to @Elo20, focuses on one sole aspect of the game to create a widespread system of ranking. With baseball, the ranking system is much more compact as it is more likely for an average baseball team to beat the top team in the league than it is for an average chess player to beat the top chess player in the world. Therefore, the Elo system will be based on a much smaller scale than that of the chess Elo system. Also, the Elo system for this model will be split into two separate models, an offensive Elo (oElo) and a defensive Elo (dElo). The reasoning for this is very simple, baseball is one of the only sports in which the defense has control of the ball, so we must account for a defensive analysis as well as an offensive analysis.
+
+# Pre-programming
+
+Before any code must be done, there are certain groups of functions, called packages, that need to be installed and loaded. Figure 1 consists of all packages that need to be installed for use in this coding project.
+
+### Figure 1: Package installation and loading
+
+```{r, eval=FALSE}
+library(ggplot2)
+library(lattice)
+library(rsample)
+library(caret)
+library(baseballr)
+library(dplyr)
+library(Lahman)
+library(vip)
+library(pls)
+```
+
+```{r, include=FALSE}
+library(ggplot2)
+library(lattice)
+library(rsample)
+library(caret)
+library(baseballr)
+library(dplyr)
+library(Lahman)
+library(vip)
+library(pls)
+```
+
+There are a few key ideas that pertain only to the model-making process, which helps give us a better and more accurate model. RStudio has a package called `caret` that allows the use of the `train` function. The very basics of the `train` function are quite simple. Using the `train` function, you can help train a model to predict one or more variables from one or more given variables. For example, the notation "m1 \<- train(HR \~ . , data = d1)" means that I am training a model m1 to predict HR from all the other variables in the data set d1. Within the `train` function, there are several parts that I can utilize to get a more accurate model, one of these being the "method" call. Using the method input, I can tell train what type of model I would like to create. Without using the method, train will automatically create a random forest model which, while accurate, is not always the best model for the job, as we see later on. The other two steps I can use are the `trControl` and `preProcess` steps. These two are common throughout all the models I have tested and are easy to understand and explain. The trControl variable used during this predictive analysis is a ten-fold cross-validation, which means a data set is split into 10 different folds, or sections, using a `trainControl` function with the method `cv.` Each fit is used 9 times out of 10 for training the model, and once for validating the model during the full process. The preProcess step is a combination of `nzv`, which removes variables with near-zero variance, `center`, and `scale` which the previous combination will center and scale the data to make the resulting data more accurate in predictions. Figure 2 contains the code for these steps.
+
+### Figure 2: Code for pre-processing and trained control
+
+```{r}
+cv <- trainControl(method = "cv", number = 10)
+pp <- c("nzv", "scale", "center")
+```
+
+# Offensive Model Creation
+
+To begin creating the Elo system, the first step in the process was to figure out which data set(s) would be the training data for the model. To determine this, a year where all games are played fits the predictive modeling process best. Therefore, the year 2018 was decided to be the final testing data set to compare the expected offensive production from the 2017 data. This means that I create the model based on the 2016 data to predict the 2017 data, and then use the actual set of data from 2017 in order to predict the two data points in 2018. Next, I need to decide just what type of model will be used to help predict the runs and runs allowed for a team. Running multiple tests on the given data sets, I was able to determine which model will give us the least error, calculated as the root mean square error (RMSE). By splitting the data into the offensive and defensive sides of data (see Fig. 3), I can begin the process of finding the best offensive and defensive models for the projected runs for and runs against.
+
+### Figure 3: Code of Splitting Training and Testing Data
+
+```{r}
+teamStats18 <- Teams %>% filter(yearID == 2018) %>%
+  mutate(RpG = R/G, RApG = RA/G)
+teamStats17O <- Teams %>% filter(yearID == 2017) %>% select(G, R:SB) %>% 
+  mutate(NYRpG = teamStats18$RpG,RpG = R/G)
+teamStats17D <- Teams %>% filter(yearID == 2017) %>% select(G, RA, CG:FP) %>% 
+  mutate(NYRApG = teamStats18$RApG, RApG = RA/G)
+teamStats16O <- Teams %>% filter(yearID == 2016) %>% select(G, R:SB) %>% 
+  mutate(NYRpG = teamStats17O$RpG)
+teamStats16D <- Teams %>% filter(yearID == 2016) %>% select(G, RA, CG:FP) %>% 
+  mutate(NYRApG = teamStats17D$RApG)
+```
+
+When beginning the calculation of the offensive Elo, I start with how I want to calculate the oElo. For the first two weeks of the season, I will calculate the oElo from the previous season's data. In order to do this, I began by calculating the next year's runs per game (NYRpG) variable in both the 2016 and 2017 MLB datasets. From there, I solely focused on the 2016 data set to help with the creation of the offensive model to predict the runs for the 2017 data set. The process of figuring out which model to use, however, is very tedious, as I must manually check each model for its RMSE value. The RMSE value will tell us the amount of error for the specific variable, so the goal is to minimize that RMSE value as much as possible. When creating the model, the programming process followed the same basic steps process. The code for this process is seen here:
+
+### Figure 4a: Code for Offensive Model Creation
+
+```{r}
+modO <- train(x = teamStats16O %>% select(-NYRpG, -G), y = teamStats16O$NYRpG,
+              method = "pls", preProc = pp, trControl = cv)
+vip(modO)
+```
+
+In figure 4a, I am creating a model from the teamStats16O data set to predict the NYRpG variable from all the columns in teamStats16O besides the NYRpG and the game (G) variable. From there, the `vip` function, which creates a plot that shows the variable importance for all the variables used to predict NYRpG, is used on the model to get the five most important variables for projection. Then, figure 4b shows the model being recreated with only the five most important factors.
+
+### Figure 4b: Code for Offensive Model Creation
+
+```{r}
+modO <- train(x = teamStats16O %>% select(R, H, AB, HR, X2B), 
+              y = teamStats16O$NYRpG, method = "pls", trControl = cv,
+              preProc = pp)
+predO <- predict(modO, teamStats17O)
+RMSE(predO, teamStats18$RpG)
+```
+
+Using the model, I can predict the NYRpG for any data set as long as it has the five variables used in the model and those variables are named and categorized exactly the same. To test the accuracy of the model, I predict the NYRpG column from the teamStats17O data set, and then take the RMSE of the prediction and compare it to the RpG column of the teamStats18 data set, which shows us the accuracy of the data. For instance, the graph above is an example of a `vip` function on the model using the above code. Using this model, the five most important variables would be runs (`R`), hits (`H`), at-bats (`AB`), home runs (`HR`), and doubles (`X2B`). I would then recreate the model using these five variables, use it with the data set and then predict the runs for that year. For the model, the RMSE is within 0.47 runs per game error, meaning the model has an error range, on average, of about 0.47 when predicting the runs for 2018 based on the 2017 data.
+
+By following this method, I was able to determine for the offensive model that the best method of testing falls under the `pls` abbreviation, which stands for partial least squares. The partial least squares model is a form of the linear regression model that projects both the predicted variable and the variables used for the model called observable variables. The PLS model will find the relations between the two sets of variables, and use these relations in order to create the most accurate model.
+
+# Defensive Model Creation
+
+When creating the defensive model, the same basic steps to create the offensive model were followed in order to create the defensive model. However, once I figured out the most important variables, only the four (4) most important variables were used, as the fifth variable will be extracted from the starting pitcher's ERA statistic. The full code for the defensive model is seen below in figure 5.
+
+### Figure 5: Code for Defensive Model Creation
+
+```{r}
+modD <- train(x = teamStats16D %>% select(-NYRApG, -G), y = teamStats16D$NYRApG,
+              method = "pls", preProc = pp, trControl = cv)
+vip(modD)
+
+modD <- train(x = teamStats16D %>% select(SOA, HA, DP, BBA), 
+              y = teamStats16D$NYRApG, method = "pls", trControl = cv,
+              preProc = pp)
+predD <- predict(modD, teamStats17D)
+RMSE(predD, teamStats18$RApG)
+```
+
+Instead of creating the model to predict the runs for the next year, I predicted the runs against per game, denoted as `NYRApG`, for the next year using the previous year's data. The four most important variables were strikeouts allowed (SOA), hits allowed (HA), double plays (DP), and walks allowed (BBA). Once I create the predictions and test the RMSE, I can see that the defensive model is more accurate than the offensive model, having an RMSE of around 0.4 runs allowed per game.
+
+# 2021 Season Data Manipulation
+
+With the two models created based on historic data, the current season predictions begin to take form. Three separate files needed to be installed for the current season's predictions to even begin to take form. These three are the current MLB players data frame, the team statistics from the previous season, and the pitcher statistics from the previous season. Two of the three files had been modified slightly to make their implementation easier. The team statistics and the pitching stats data have been modified to only include data from the 2021 season. The code for the installation of these local files is seen in figure 6.
+
+### Figure 6: Updated Statistical File Installation
+
+```{r}
+
+people22 <- read.csv("People.csv") 
+teamStats21 <- read.csv("Teams21.csv")
+pitch21 <- read.csv("Pitching21.csv") 
+
+```
+
+In order to use the data sets, however, each set must be further modified to contain the statistics to make the model implementation as streamlined as possible. These modifications can be seen in figure 7 below.
+
+### Figure 7a: Code for Data Manipulation and Concatination
+
+```{r}
+
+pitch21 <- pitch21 %>% add_row(playerID = "np01", ERA = 5) %>% 
+  group_by(playerID) %>% mutate(ERA = mean(ERA)) 
+pitch22FM <- pitch21 %>% select(playerID, ERA) %>% distinct()
+people22 <- people22 %>% filter(finalGame > "2020-01-01") %>% 
+  mutate(fullName = paste(nameFirst, nameLast, sep = " ")) %>% 
+  select(playerID, fullName)
+peoPit <- merge(pitch22FM, people22, by = "playerID")
+```
+
+In figure 7a, the pitching data frame is modified to include a row for players without a playerID. These players are exclusively rookies or players that haven't pitched a game in Major League Baseball prior to the 2022 season. Then these statistics are grouped by the playerID, as some players will play for multiple teams in a season. From there, I take an average of the ERAs for all players individually, however, the mean will only be taken for those players who have played for multiple teams in the season. Then, to make the data set as streamlined as possible, I select the playerID and ERA columns only, as those are the only statistics that will be used for model projection. Some of the data will be duplicated, so I use the `distinct` function to get rid of any duplicate sets of data. For the people data, a filter was used to remove all people whose most recent game is after the beginning of 2020, meaning they've played a game in the past two (2) years. Then, a fullName column was created using the firstName and lastName columns with a space separator within the `paste` function. Then to wrap up the people data, I select only the necessary variables, which are the playerID variable and the newly created fullName variable. I then combine the two data frames into just one simple data frame called `peoPit` by referencing both data frame's `playerID` variable. Finally, I begin the process of modifying the most important data set for this projection, the teams data, which is shown in figure 7b.
+
+### Figure 7b: Code for Data Manipulation and Concatination
+
+```{r}
+teamStats21$NYRpG <- predict(modO, teamStats21)
+teamStats21$NYRApG <- predict(modD, teamStats21)
+teamStats21$attendance <- teamStats21$attendance/teamStats21$Ghome
+team22FTG <- teamStats21 %>% 
+  mutate(AtS = attendance/100000, PRpG = NYRpG, PRApG = NYRApG) %>% 
+  select(teamID, franchID, name, AtS, PRpG, PRApG)
+team22FTG[team22FTG == "Los Angeles Angels of Anaheim"] <- "Los Angeles Angels"
+team22FTG[team22FTG == "Cleveland Indians"] <- "Cleveland Guardians"
+```
+
+The teams data has by far the most changes needed to be made, and this begins simply by converting the total attendance number and dividing it by the total number of home games (Ghome) to get the attendance per game variable, which just slots directly into the old attendance column. Then, I use the two created models, modO and modD, to predict two of the main variables for this prediction, NYRpG and NYRApg, respectively. Then, using the teams data, a new data frame is created in which I take the current team stats and mutate them into three new columns. These are the attendance strength score (AtS), which is calculated by taking the average attendance per home game and dividing it by 100,000; the predicted runs per game variable (PRpG); and the predicted runs against per game (PRApG) variable. The next step was to select only the necessary variables, which are the team ID (teamID), the franchise ID (franchID), the team name (name), the AtS, the PRpG, and the PRApG. The last step in the main data manipulation is to officially change the two team names that have changed from last season. The Los Angeles Angels have dropped the "of Anaheim" portion of their name and the new Cleveland Guardians are a result of the re-brand of the Cleveland Indians.
+
+# Function Creation for Game Projections
+
+The final portion of model creation is the creation of the functions used in order to help make the data accessible for regular usage. Two functions were created to make data acquisition easier. These two functions are called `gameOutput` and `dateOutput`. The coding for the `gameOutput` function can be seen beginning in figure 8a, and the coding for the `dateOutput` function can be seen in figure 9.
+
+### Figure 8a: Creation of `gameOutput` Function Code
+
+```{r, eval=FALSE}
+gameOutput <- function(awayTeam, homeTeam, Date, gameNum) {
+  if(nchar(homeTeam) == 3) homeTeamName = team22FTG$name[
+    team22FTG$teamID == homeTeam | team22FTG$franchID == homeTeam]
+  else homeTeamName = homeTeam
+  if(nchar(awayTeam) == 3) awayTeamName = team22FTG$name[
+    team22FTG$teamID == awayTeam | team22FTG$franchID == awayTeam]
+  else awayTeamName = awayTeam
+```
+
+Figure 8a begins the process of creating a function to put all the data together to get the output for a specific game. The function requires three (3) inputs, the away team, the home team, and the date, all of which are string variables, but can accept a fourth variable if the game number (gameNum) is known. The first two steps are to detail the name and make sure it fits into the baseballr package properly. The baseballr package uses full team names to reference the game, so it is necessary to make sure to input the full name into the baseballr package to get the correct information. With the above code block, it takes the input `awayTeam` and `homeTeam` names and checks to see if the number of charterers is equal to three (3). If so, it looks to find the abbreviation in the team22FTG data set and if the abbreviation exists in the table, it assigns the new `awayTeamName` and `homeTeamName` with the full name linking directly to the abbreviation. If the abbreviation is not found, it stops the code. If the number of characters is not three (3), it stores whatever is in the `awayTeam` and `homeTeam` inputs into the `awayTeamName` and `homeTeamName` variables, respectively. In Figure 8b, I use these variables to check if a game is actually scheduled on the date provided.
+
+### Figure 8b: Creation of `gameOutput` Function Code
+
+```{r, eval=FALSE}
+  daySched <- mlb_game_pks(Date)
+  if(missing(gameNum)) gameNum <- daySched$game_pk[daySched$teams.away.team.name ==
+                                  awayTeamName & daySched$teams.home.team.name == 
+                                  homeTeamName]
+  gamePitch <- (mlb_probables(gameNum)) %>% select(team, fullName) %>% 
+    group_by(fullName) %>% mutate(playerID = NA)
+```
+
+In Figure 8b, the `mlb_game_pks` function is used to get the full daily schedule for the day provided at the beginning of the function call, and this full daily schedule is stored in the `daySched` data frame. Then, if the gameNum variable is not given in the beginning of the function call, I can check if the two teams given are facing off on the given day using the `awayTeamName` and `homeTeamName` variables. If so, the `gameNum` variable will store the game_pk value for which the two given teams will face off. Using the `mlb_probables` function from the baseballr package, I get the probable starters for the game in question and then select just the team and fullName variables. To make the function work nicer, I group the data frame by the fullName variable and add an empty column named "playerID" to eventually get the playerID from the Player22 data frame that was created earlier. That process is seen in Figure 8c.
+
+### Figure 8c: Creation of `gameOutput` Function Code
+
+```{r, eval=FALSE}
+   for (i in 1:2) {
+    test <- NROW(peoPit$playerID[peoPit$fullName == gamePitch$fullName[i]])
+    if (test == 0) gamePitch [i,3] = "np01"
+    else if (test > 1) {
+      temp <- peoPit %>% distinct(playerID, ERA, fullName)
+      test <- NROW(temp$playerID[temp$fullName == gamePitch$fullName[i]])
+      if (test > 1) {
+        teamAbr <- team22FTG$teamID[gamePitch$team[i] == team22FTG$name]
+        gamePitch [i,3] = peoPit$playerID[peoPit$teamID == teamAbr & 
+                                          peoPit$fullName == gamePitch$fullName[i]]
+      }
+      else gamePitch [i,3] = temp$playerID[temp$fullName == gamePitch$fullName[i]]
+    }
+    else gamePitch [i,3] = peoPit$playerID[peoPit$fullName == gamePitch$fullName[i]]
+   }
+
+```
+
+Looking at Figure 8c, I am extracting the playerID variable from the `peoPit` data frame that was created in Figure 7a. I created a `test` variable that stores the number of rows that are produced when we attempt to extract the playerID. If the test value comes back as a zero (0), this means that there is no playerID for the starting pitcher. Therefore, the starting pitcher's playerID is assigned the value of `np01`, which just means they are a new pitcher in the league as of this season. From there, I check to see if more than one thing came back in the test variable. If so, I check to see if the duplication comes from a player playing for multiple teams in a season or if it comes from more than one person sharing the same exact name. By creating a temporary datafram that takes the distinct values of the playerID, ERA, and fullName variables from the `peoPit` data frame, I recreate the test variable from before and check it once again for the number of rows. If the test variable is still greater than one, then more than one person shares the same name, and I determine which playerID to use based off of which teams they've played for. If the test is equal to one, in either case, then the playerID value that corresponds to the pitcher's full name. In Figure 8d, I find the two starting pitcher's ERA values based off of their respective playerID.
+
+\newpage
+
+### Figure 8d: Creation of `gameOutput` Function Code
+
+```{r, eval=FALSE}
+  if (gamePitch$playerID[1] %in% pitch21$playerID) awayPitchERA <- 
+      peoPit$ERA[peoPit$playerID == gamePitch$playerID[1]]
+  else awayPitchERA = 4.5
+  if (gamePitch$playerID[2] %in% pitch21$playerID) homePitchERA <- 
+      peoPit$ERA[peoPit$playerID == gamePitch$playerID[2]]
+  else homePitchERA = 4.5
+  gamePitch <- gamePitch %>% rename(projStart = fullName)
+```
+
+In Figure 8d, I check to see if the starting pitcher has a playerID from the 2021 season. If they do have a playerID, I then check if there it is assigned to the `gamePitch` data frame. Then, if the player pitched in the previous season, their ERA for last season is stored in either the `awayPitchERA` or `homePitchERA`, depending on if they are the away or home team's starting pitcher. If they didn't play last year and their playerID is `np01` the ERA is set to 5. If they didn't play last year, but they have a playerID other than `np01` the ERA is set to 4.5, as they have some experience but haven't played in at least the past year. Finally, I just rename the "fullName" column in the gamePitch data frame to have the "projStart" name. In Figure 8e, the stats for the Elo calculation are formatted and the output data frame `outDF` is created.
+
+### Figure 8e: Creation of `gameOutput` Function Code
+
+```{r, eval=FALSE}
+  homeTeamRuns <- c(team22FTG$PRpG[team22FTG$name == homeTeamName], 
+                    team22FTG$AtS[team22FTG$name == homeTeamName], 
+                    team22FTG$PRApG[team22FTG$name == awayTeamName], 
+                    awayPitchERA)
+  awayTeamRuns <- c(team22FTG$PRpG[team22FTG$name == awayTeamName], 0, 
+                    team22FTG$PRApG[team22FTG$name == homeTeamName],
+                    homePitchERA)
+  outDF <- gamePitch %>% mutate(projRuns = NA, attScr = NA, oppRunsAll = NA, 
+                                oppPitERA = NA, oElo = NA, odElo = NA, 
+                                finalElo = NA)
+```
+
+As shown in Figure 8e, two variables are created within the function, which are the "homeTeamRuns" and "awayTeamRuns" which takes the team's projected runs per game and attendance score (which is 0 for the away team), and takes the opposing team's projected runs allowed per game and the opposing pitcher's ERA. Then, the final data frame is created by taking the "gamePitch" data frame and mutating empty columns with the projected runs (projRuns), attendance score (attScr), opponent runs allowed (oppRunsAll), opponent pitcher ERA (oppPitERA), offensive Elo (oElo), the opponent's defensive Elo (odElo), and a final Elo rating (finalElo).
+\newpage
+
+### Figure 8f: Creation of `gameOutput` Function Code
+
+```{r, eval=FALSE}
+  for (i in 1:NROW(awayTeamRuns)) {
+    outDF[1,i+3] = awayTeamRuns[i]
+    outDF[2,i+3] = homeTeamRuns[i]
+  }
+  for (i in 1:2) {
+    outDF[i,8] = outDF[i,4] + outDF[i,5]
+    outDF[i,9] = (0.45 * outDF[i,6] + 0.55 * outDF[i,7])
+    outDF[i,10] = (outDF[i,8] + outDF[i,9])/2
+  }
+  return(outDF)
+}
+```
+
+Finally, Figure 8f inputs all the necessary information into the "outDF" data frame. In the first for loop, it takes the values from the `awayTeamRuns` and `homeTeamRuns` and stores them into the correct row of `outDF`, with the away team in the first row and the home team in the second row. In the second for loop, it calculates the offensive Elo (oElo) variable for both teams by adding the projected runs and the attendance score variables. It then calculates the opposing team's defensive Elo (odElo) by creating a weighted average of the opposing team's runs against projection and the opposing pitcher's ERA. Finally, the final Elo (finalElo) is calculated by taking the mean of the `oElo` and `odElo` variables and then outputs the `outDF` data frame.
+
+The second function created is the `dateOutput` function, and the process for creating the function is seen in Figure 9 below.
+
+### Figure 9: Creation of `dateOutput` Function Code
+
+```{r}
+dateOutput <- function(Date) {
+  daySched <- mlb_game_pks(Date)
+  for(i in 1:NROW(daySched)) {
+    gameNum = daySched$game_pk[i]
+    awayTeam = daySched$teams.away.team.name[i]
+    homeTeam = daySched$teams.home.team.name[i]
+    out <- gameOutput(awayTeam, homeTeam, Date, gameNum)
+    print(out[c(1,2,10)])
+  }
+}
+```
+
+The `dateOutput` function takes the game schedule for the provided date and stores the schedule into the `daySched` data frame. From there, a for loop runs for all the games in the `daySched` data frame and takes the `awayTeam`, `homeTeam`, and `gameNum` variables from the date frame. It then runs the `gameOutput` function with these variables. To make accessing these results easier, only the team names, starting pitchers, and final Elo values are printed.
+
+# Function Implementation to 2022 Season Data
+
+Using the newly created `dateOutput` function, the schedule up to the 21st of April was predicted, and the results are seen on the next page in Figure 10.
+
+### Figure 10: Model implementation through 4/20/2022
+
+| Date      | Wins | Losses | Percent |
+|-----------|------|--------|---------|
+| 4/7/2022  | 3    | 4      | 42.9%   |
+| 4/8/2022  | 10   | 2      | 83.3%   |
+| 4/9/2022  | 7    | 8      | 46.7%   |
+| 4/10/2022 | 10   | 5      | 66.7%   |
+| 4/11/2022 | 3    | 8      | 27.3%   |
+| 4/12/2022 | 10   | 5      | 66.7%   |
+| 4/13/2022 | 7    | 5      | 58.3%   |
+| 4/14/2022 | 7    | 4      | 63.6%   |
+| 4/15/2022 | 7    | 8      | 46.7%   |
+| 4/16/2022 | 11   | 4      | 73.3%   |
+| 4/17/2022 | 6    | 8      | 42.9%   |
+| 4/18/2022 | 6    | 2      | 75.0%   |
+| 4/19/2022 | 9    | 6      | 60.0%   |
+| 4/20/2022 | 10   | 6      | 62.5%   |
+| TOTAL     | 106  | 75     | 58.6%   |
+
+This shows that while this model is not completely perfect, it has shown positive results with a 58.6% accuracy while using the previous season's data to predict the runs for the current season. But with the current state of Major League Baseball, just having a set of predictions is not good enough. Using this prediction style, I have done some betting predictions over a three-day period beginning on April 18th and have recorded game-by-game betting lines for those three days. A list of the betting results on April 18th can be seen on the next page in Figure 11, and the total progress for those days can be seen in Figure 12.
+
+### Figure 11: All Games with Projected Bets on April 18th, 2022
+
+| Team                | Bet Amount | Odds | Result| To Win | Potential Return | Profit/Loss | Cumulative Profit/Loss |
+|---------------------------|----------|------|------|------|------------|-------------|----------------------|
+| Los Angeles Dodgers | \$50.00    | -213 | Win    | \$23.47 | \$73.47          | \$23.47     | \$23.47                |
+| San Diego Padres    | \$50.00    | -183 | Win    | \$27.32 | \$77.32          | \$27.32     | \$50.80                |
+| Oakland Athletics   | \$50.00    | -185 | Win    | \$27.03 | \$77.03          | \$27.03     | \$77.82                |
+| Colorado Rockies    | \$50.00    | +152 | Win    | \$76.00 | \$126.00         | \$76.00     | \$153.82               |
+| Houston Astros      | \$50.00    | -138 | Win    | \$36.23 | \$86.23          | \$36.23     | \$190.06               |
+| Milwaukee Brewers   | \$50.00    | -170 | Win    | \$29.41 | \$79.41          | \$29.41     | \$219.47               |
+| Tampa Bay Rays      | \$50.00    | -142 | Loss   | \$35.21 | \$85.21          | (\$50.00)   | \$169.47               |
+| Boston Red Sox      | \$50.00    | -140 | Loss   | \$35.71 | \$85.71          | (\$50.00)   | \$119.47               |
+
+### Figure 12: Simulated Bets Based off of Moneyline Bets for April 18th to April 20th
+
+| DAYS      | Money "Bet" | Day Profit | Total Profit |
+|-----------|-------------|------------|--------------|
+| 4/18/2022 | \$400.00    | \$119.47   | \$119.47     |
+| 4/19/2022 | \$800.00    | \$(11.08)  | \$108.39     |
+| 4/20/2022 | \$800.00    | \$58.87    | \$167.26     |
+
+In Figure 11, the model was tested against the moneyline odds provided by @Odds22, which takes an average of some of the major betting sites' moneylines. I can see that of the 8 games for that day, the model only predicted to be one upset (+) and the model was correct in that upset prediction. Being this positive after one day of betting games, I continued the betting trends into the next three days, and this is seen in figure 12 above. In Figure 12, it is shown that after betting \$2,000 over 40 games total, the model would've made only \$167. While this may seem extreme for just a little bit of money, this means that you would make around 3x the money you put per game. And with the model, not every game has to be predicted. For example, on April 23rd, I was messing around with the model and saw that there was a projected tie between the Colorado Rockies and the home Detroit Tigers. With this, a normal person probably wouldn't bet on the game, but for the purposes of this model, the home team was selected to be bet on.
+
+From @MaLe21, previous models that have been attempted to be created are much more in-depth and use much more modeling variables, and only produce about 60% accuracy. With this model being much simpler than those models, I am happy to have an accuracy of 58.6%. While this model does have room for more variable implementation and to add more to the actual function creations, being just a little bit more than one percent off of the Vegas betting lines shows that this was a successful modeling process and a successful result to start the 2022 Major League Baseball season off on the right foot.
+
+\newpage
+
+# Bibliography
+
+::: {#refs}
+:::
+
+\newpage
+
+# Full Code
+
+```{r eval=FALSE}
+library(rsample)
+library(caret)
+library(baseballr)
+library(dplyr)
+library(Lahman)
+library(vip)
+library(pls)
+
+
+teamStats18 <- Teams %>% filter(yearID == 2018) %>%  mutate(RpG = R/G, RApG = RA/G)
+teamStats17O <- Teams %>% filter(yearID == 2017) %>% select(G, R:SB) %>% 
+  mutate(NYRpG = teamStats18$RpG,RpG = R/G)
+teamStats17D <- Teams %>% filter(yearID == 2017) %>% select(G, RA, CG:FP) %>% 
+  mutate(NYRApG = teamStats18$RApG, RApG = RA/G)
+teamStats16O <- Teams %>% filter(yearID == 2016) %>% select(G, R:SB) %>% 
+  mutate(NYRpG = teamStats17O$RpG)
+teamStats16D <- Teams %>% filter(yearID == 2016) %>% select(G, RA, CG:FP) %>% 
+  mutate(NYRApG = teamStats17D$RApG)
+
+cv <- trainControl(method = "cv", number = 10)
+pp <- c("nzv", "scale", "center")
+modO <- train(x = teamStats16O %>% select(-NYRpG, -G), y = teamStats16O$NYRpG, 
+              method = "pls", preProc = pp, trControl = cv)
+vip(modO)
+modO <- train(x = teamStats16O %>% select(R, H, AB, HR, X2B), y = teamStats16O$NYRpG, 
+              method = "pls", trControl = cv, preProc = pp)
+predO <- predict(modO, teamStats17O)
+RMSE(predO, teamStats18$RpG)
+
+modD <- train(x = teamStats16D %>% select(-NYRApG, -G), y = teamStats16D$NYRApG, 
+              method = "pls", preProc = pp, trControl = cv)
+vip(modD)
+modD <- train(x = teamStats16D %>% select(SOA, HA, DP, BBA), y = teamStats16D$NYRApG, 
+              method = "pls", preProc = pp, trControl = cv)
+predD <- predict(modD, teamStats17D)
+RMSE(predD, teamStats18$RApG)
+
+people22 <- read.csv("People.csv") 
+teamStats21 <- read.csv("Teams21.csv")
+pitch21 <- read.csv("Pitching21.csv") 
+pitch21 <- pitch21 %>% add_row(playerID = "np01", ERA = 5) %>% group_by(playerID) %>% 
+  mutate(ERA = mean(ERA), IPouts = sum(IPouts)) 
+pitch22FM <- pitch21 %>% select(playerID, ERA, teamID)
+people22 <- people22 %>% filter(finalGame > "2021-09-18") %>% 
+  mutate(fullName = paste(nameFirst, nameLast, sep = " ")) %>% select(playerID, fullName) 
+peoPit <- merge(pitch22FM, people22, by = "playerID")
+teamStats21$attendance <- teamStats21$attendance/teamStats21$Ghome
+teamStats21$NYRpG <- predict(modO, teamStats21)
+teamStats21$NYRApG <- predict(modD, teamStats21)
+team22FTG <- teamStats21 %>% mutate(AtS = attendance/100000, PRpG = NYRpG, PRApG = 
+  NYRApG) %>% select(teamID, franchID, name, AtS, PRpG, PRApG)
+team22FTG[team22FTG == "Los Angeles Angels of Anaheim"] <- "Los Angeles Angels"
+team22FTG[team22FTG == "Cleveland Indians"] <- "Cleveland Guardians"
+ 
+gameOutput <- function(awayTeam, homeTeam, Date, gameNum) {
+  if(nchar(homeTeam) == 3) homeTeamName = team22FTG$name[team22FTG$teamID == homeTeam | 
+                                                           team22FTG$franchID == homeTeam]
+  else homeTeamName = homeTeam
+  if(nchar(awayTeam) == 3) awayTeamName = team22FTG$name[team22FTG$teamID == awayTeam | 
+                                                           team22FTG$franchID == awayTeam]
+  else awayTeamName = awayTeam
+  daySched <- mlb_game_pks(Date)
+  if(missing(gameNum)){
+    gameNum <- daySched$game_pk[daySched$teams.away.team.name == awayTeamName & 
+                                  daySched$teams.home.team.name == homeTeamName]
+  }
+  gamePitch <- (mlb_probables(gameNum)) %>% select(team, fullName) %>% 
+    group_by(fullName) %>% mutate(playerID = NA)
+  for (i in 1:2) {
+    test <- NROW(peoPit$playerID[peoPit$fullName == gamePitch$fullName[i]])
+    if (test == 0) gamePitch [i,3] = "np01"
+    else if (test > 1) {
+      temp <- peoPit %>% distinct(playerID, ERA, fullName)
+      test <- NROW(temp$playerID[temp$fullName == gamePitch$fullName[i]])
+      if (test > 1) {
+        teamAbr <- team22FTG$teamID[gamePitch$team[i] == team22FTG$name]
+        gamePitch [i,3] = peoPit$playerID[peoPit$teamID == teamAbr & peoPit$fullName == 
+                                            gamePitch$fullName[i]]
+      }
+      else gamePitch [i,3] = temp$playerID[temp$fullName == gamePitch$fullName[i]]
+    }
+    else gamePitch [i,3] = peoPit$playerID[peoPit$fullName == gamePitch$fullName[i]]
+  }
+  if (gamePitch$playerID[1] %in% peoPit$playerID) awayPitchERA <- peoPit$ERA[
+    peoPit$playerID == gamePitch$playerID[1]]
+  else awayPitchERA = 4.5
+  if (gamePitch$playerID[2] %in% peoPit$playerID) homePitchERA <- peoPit$ERA[
+    peoPit$playerID == gamePitch$playerID[2]]
+  else homePitchERA = 4.5
+  gamePitch <- gamePitch %>% rename(projStart = fullName)
+  homeTeamRuns <- c(team22FTG$PRpG[team22FTG$name == homeTeamName], team22FTG$AtS[
+    team22FTG$name == homeTeamName], team22FTG$PRApG[team22FTG$name == awayTeamName], 
+    awayPitchERA)
+  awayTeamRuns <- c(team22FTG$PRpG[team22FTG$name == awayTeamName], 0, team22FTG$PRApG[
+    team22FTG$name == homeTeamName], homePitchERA)
+  outDF <- gamePitch %>% mutate(projRuns = NA, attScr = NA, oppRunsAll = NA, 
+                                oppPitERA = NA, offElo = NA, oppDefElo = NA, 
+                                finalElo = NA)
+  for (i in 1:NROW(awayTeamRuns)) {
+    outDF[1,i+3] = awayTeamRuns[i]
+    outDF[2,i+3] = homeTeamRuns[i]
+  }
+  for (i in 1:2) {
+    outDF[i,8] = outDF[i,4] + outDF[i,5]
+    outDF[i,9] = (0.45 * outDF[i,6] + 0.55 * outDF[i,7])
+    outDF[i,10] = (outDF[i,8] + outDF[i,9])/2
+  }
+  return(outDF)
+}
+
+dateOutput <- function(Date) {
+  daySched <- mlb_game_pks(Date)
+  for(i in 1:NROW(daySched)) {
+    gameNum = daySched$game_pk[i]
+    awayTeam = daySched$teams.away.team.name[i]
+    homeTeam = daySched$teams.home.team.name[i]
+    out <- gameOutput(awayTeam, homeTeam, Date, gameNum)
+    print(out[c(1,2,10)])
+  }
+}
+
+
+
+```

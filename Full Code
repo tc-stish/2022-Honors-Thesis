@@ -1,0 +1,120 @@
+library(rsample)
+library(caret)
+library(baseballr)
+library(dplyr)
+library(Lahman)
+library(vip)
+library(pls)
+
+
+teamStats18 <- Teams %>% filter(yearID == 2018) %>%  mutate(RpG = R/G, RApG = RA/G)
+teamStats17O <- Teams %>% filter(yearID == 2017) %>% select(G, R:SB) %>% 
+  mutate(NYRpG = teamStats18$RpG,RpG = R/G)
+teamStats17D <- Teams %>% filter(yearID == 2017) %>% select(G, RA, CG:FP) %>% 
+  mutate(NYRApG = teamStats18$RApG, RApG = RA/G)
+teamStats16O <- Teams %>% filter(yearID == 2016) %>% select(G, R:SB) %>% 
+  mutate(NYRpG = teamStats17O$RpG)
+teamStats16D <- Teams %>% filter(yearID == 2016) %>% select(G, RA, CG:FP) %>% 
+  mutate(NYRApG = teamStats17D$RApG)
+
+cv <- trainControl(method = "cv", number = 10)
+pp <- c("nzv", "scale", "center")
+modO <- train(x = teamStats16O %>% select(-NYRpG, -G), y = teamStats16O$NYRpG, 
+              method = "pls", preProc = pp, trControl = cv)
+vip(modO)
+modO <- train(x = teamStats16O %>% select(R, H, AB, HR, X2B), y = teamStats16O$NYRpG, 
+              method = "pls", trControl = cv, preProc = pp)
+predO <- predict(modO, teamStats17O)
+RMSE(predO, teamStats18$RpG)
+
+modD <- train(x = teamStats16D %>% select(-NYRApG, -G), y = teamStats16D$NYRApG, 
+              method = "pls", preProc = pp, trControl = cv)
+vip(modD)
+modD <- train(x = teamStats16D %>% select(SOA, HA, DP, BBA), y = teamStats16D$NYRApG, 
+              method = "pls", preProc = pp, trControl = cv)
+predD <- predict(modD, teamStats17D)
+RMSE(predD, teamStats18$RApG)
+
+people22 <- read.csv("People.csv") 
+teamStats21 <- read.csv("Teams21.csv")
+pitch21 <- read.csv("Pitching21.csv") 
+pitch21 <- pitch21 %>% add_row(playerID = "np01", ERA = 5) %>% group_by(playerID) %>% 
+  mutate(ERA = mean(ERA), IPouts = sum(IPouts)) 
+pitch22FM <- pitch21 %>% select(playerID, ERA, teamID)
+people22 <- people22 %>% filter(finalGame > "2021-09-18") %>% 
+  mutate(fullName = paste(nameFirst, nameLast, sep = " ")) %>% select(playerID, fullName) 
+peoPit <- merge(pitch22FM, people22, by = "playerID")
+teamStats21$attendance <- teamStats21$attendance/teamStats21$Ghome
+teamStats21$NYRpG <- predict(modO, teamStats21)
+teamStats21$NYRApG <- predict(modD, teamStats21)
+team22FTG <- teamStats21 %>% mutate(AtS = attendance/100000, PRpG = NYRpG, PRApG = 
+  NYRApG) %>% select(teamID, franchID, name, AtS, PRpG, PRApG)
+team22FTG[team22FTG == "Los Angeles Angels of Anaheim"] <- "Los Angeles Angels"
+team22FTG[team22FTG == "Cleveland Indians"] <- "Cleveland Guardians"
+ 
+gameOutput <- function(awayTeam, homeTeam, Date, gameNum) {
+  if(nchar(homeTeam) == 3) homeTeamName = team22FTG$name[team22FTG$teamID == homeTeam | 
+                                                           team22FTG$franchID == homeTeam]
+  else homeTeamName = homeTeam
+  if(nchar(awayTeam) == 3) awayTeamName = team22FTG$name[team22FTG$teamID == awayTeam | 
+                                                           team22FTG$franchID == awayTeam]
+  else awayTeamName = awayTeam
+  daySched <- mlb_game_pks(Date)
+  if(missing(gameNum)){
+    gameNum <- daySched$game_pk[daySched$teams.away.team.name == awayTeamName & 
+                                  daySched$teams.home.team.name == homeTeamName]
+  }
+  gamePitch <- (mlb_probables(gameNum)) %>% select(team, fullName) %>% 
+    group_by(fullName) %>% mutate(playerID = NA)
+  for (i in 1:2) {
+    test <- NROW(peoPit$playerID[peoPit$fullName == gamePitch$fullName[i]])
+    if (test == 0) gamePitch [i,3] = "np01"
+    else if (test > 1) {
+      temp <- peoPit %>% distinct(playerID, ERA, fullName)
+      test <- NROW(temp$playerID[temp$fullName == gamePitch$fullName[i]])
+      if (test > 1) {
+        teamAbr <- team22FTG$teamID[gamePitch$team[i] == team22FTG$name]
+        gamePitch [i,3] = peoPit$playerID[peoPit$teamID == teamAbr & peoPit$fullName == 
+                                            gamePitch$fullName[i]]
+      }
+      else gamePitch [i,3] = temp$playerID[temp$fullName == gamePitch$fullName[i]]
+    }
+    else gamePitch [i,3] = peoPit$playerID[peoPit$fullName == gamePitch$fullName[i]]
+  }
+  if (gamePitch$playerID[1] %in% peoPit$playerID) awayPitchERA <- peoPit$ERA[
+    peoPit$playerID == gamePitch$playerID[1]]
+  else awayPitchERA = 4.5
+  if (gamePitch$playerID[2] %in% peoPit$playerID) homePitchERA <- peoPit$ERA[
+    peoPit$playerID == gamePitch$playerID[2]]
+  else homePitchERA = 4.5
+  gamePitch <- gamePitch %>% rename(projStart = fullName)
+  homeTeamRuns <- c(team22FTG$PRpG[team22FTG$name == homeTeamName], team22FTG$AtS[
+    team22FTG$name == homeTeamName], team22FTG$PRApG[team22FTG$name == awayTeamName], 
+    awayPitchERA)
+  awayTeamRuns <- c(team22FTG$PRpG[team22FTG$name == awayTeamName], 0, team22FTG$PRApG[
+    team22FTG$name == homeTeamName], homePitchERA)
+  outDF <- gamePitch %>% mutate(projRuns = NA, attScr = NA, oppRunsAll = NA, 
+                                oppPitERA = NA, offElo = NA, oppDefElo = NA, 
+                                finalElo = NA)
+  for (i in 1:NROW(awayTeamRuns)) {
+    outDF[1,i+3] = awayTeamRuns[i]
+    outDF[2,i+3] = homeTeamRuns[i]
+  }
+  for (i in 1:2) {
+    outDF[i,8] = outDF[i,4] + outDF[i,5]
+    outDF[i,9] = (0.45 * outDF[i,6] + 0.55 * outDF[i,7])
+    outDF[i,10] = (outDF[i,8] + outDF[i,9])/2
+  }
+  return(outDF)
+}
+
+dateOutput <- function(Date) {
+  daySched <- mlb_game_pks(Date)
+  for(i in 1:NROW(daySched)) {
+    gameNum = daySched$game_pk[i]
+    awayTeam = daySched$teams.away.team.name[i]
+    homeTeam = daySched$teams.home.team.name[i]
+    out <- gameOutput(awayTeam, homeTeam, Date, gameNum)
+    print(out[c(1,2,10)])
+  }
+}
